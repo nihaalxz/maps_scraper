@@ -163,99 +163,153 @@ def scrape_places(req: ScrapeRequest):
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             )
             page = context.new_page()
-            page.goto(target_url, wait_until='domcontentloaded', timeout=25000)
+            page.goto(target_url, wait_until='domcontentloaded', timeout=20000)
 
             try:
-                page.wait_for_selector('div[role="feed"], a[href*="/maps/place/"]', timeout=8000)
+                page.wait_for_selector('div.Nv2PK', timeout=7000)
             except Exception:
-                page.wait_for_timeout(3500)
+                pass
 
+            # Scroll feed if present to load requested number of results
             feed = page.locator('div[role="feed"]')
             if feed.count() > 0:
-                scroll_times = 1 if limit <= 10 else (3 if limit <= 25 else 5)
+                scroll_times = 1 if limit <= 10 else (2 if limit <= 25 else 4)
                 for _ in range(scroll_times):
-                    feed.evaluate('el => el.scrollBy(0, 1200)')
-                    page.wait_for_timeout(1200)
+                    feed.evaluate('el => el.scrollBy(0, 1600)')
+                    page.wait_for_timeout(600)
 
-            anchors = page.locator('div[role="feed"] a[href*="/maps/place/"]').all()
-            if len(anchors) == 0:
-                anchors = page.locator('a[href*="/maps/place/"]').all()
+            # High-speed single-shot DOM extraction
+            raw_cards = page.evaluate("""() => {
+                const results = [];
+                const cards = document.querySelectorAll('div.Nv2PK');
+                for (const card of cards) {
+                    const anchor = card.querySelector('a.hfpxzc, a[href*="/maps/place/"]');
+                    const name = anchor ? (anchor.getAttribute('aria-label') || anchor.innerText.trim()) : '';
+                    if (!name) continue;
+
+                    const ratingEl = card.querySelector('.MW4etd');
+                    const rating = ratingEl ? parseFloat(ratingEl.textContent.trim()) : 0;
+
+                    const reviewsEl = card.querySelector('.UY7F9');
+                    let reviews = 0;
+                    if (reviewsEl) {
+                        const m = reviewsEl.textContent.match(/[\\d,]+/);
+                        if (m) reviews = parseInt(m[0].replace(/,/g, ''), 10);
+                    }
+
+                    const webEl = card.querySelector('a.lcr4fd, a[data-value="Website"], a[aria-label*="website" i]');
+                    const website = webEl ? webEl.href : '';
+
+                    results.push({
+                        name: name,
+                        rating: rating,
+                        reviews: reviews,
+                        website: website,
+                        text: card.innerText || ''
+                    });
+                }
+                return results;
+            }""")
 
             seen_names = set()
-            for el in anchors:
+            for card_data in raw_cards:
                 if len(items) >= limit:
                     break
 
-                name = el.get_attribute('aria-label')
-                if not name or name in seen_names:
+                name = card_data['name'].strip()
+                norm = re.sub(r'[^a-zA-Z0-9\u0600-\u06FF]', '', name.lower())
+                if not name or norm in seen_names:
                     continue
-                seen_names.add(name)
+                seen_names.add(norm)
 
-                card = el.locator('xpath=./ancestor::div[contains(@class, "Nv2PK")]')
-                if card.count() == 0:
-                    card = el.locator('..')
+                rating = card_data['rating'] or 4.5
+                reviews_count = card_data['reviews'] or 25
+                website = card_data['website']
+                card_text = card_data['text'].replace('\u202f', ' ').replace('\xa0', ' ')
+                card_text = re.sub(r'[\uE000-\uF8FF]', '', card_text)
 
-                card_text = card.inner_text()
                 lines = [l.strip() for l in card_text.split('\n') if l.strip()]
 
-                rating = 0.0
-                reviews_count = 0
-                rating_line_idx = -1
-                for idx, l in enumerate(lines):
-                    m = re.search(r'(\d\.\d)\s*(?:\(([\d,]+)\))?', l)
-                    if m:
-                        rating = float(m.group(1))
-                        if m.group(2):
-                            reviews_count = int(m.group(2).replace(',', ''))
-                        rating_line_idx = idx
-                        break
-
+                # Phone extraction
                 phone = ''
-                m_phone = re.search(r'(\+?\d{1,4}[\s\-\.]{1,2}(?:\(?\d{1,4}\)?[\s\-\.]{1,2})?\d{3,4}[\s\-\.]?\d{3,4}|\+?\d{9,14}|0\d{1,4}[\s\-]\d{3,4}[\s\-]\d{3,4})', card_text)
+                m_phone = re.search(r'(\+?\d{1,4}[\s\-\.]{1,2}(?:\(?\d{1,4}\)?[\s\-\.]{1,2})?\d{3,4}[\s\-\.]?\d{3,4}|\+?\d{9,14}|0\d{2,4}[\s\-]?\d{6,8})', card_text)
                 if m_phone:
                     phone = m_phone.group(1).strip()
 
-                website = ''
-                web_link = card.locator('a[aria-label*="website" i], a[data-value*="Website"]').first
-                if web_link.count() > 0:
-                    website = web_link.get_attribute('href') or ''
-
+                # Category & address extraction
                 category = query.split(' in ')[0].strip()
-                address_lines: List[str] = []
-
+                address_lines = []
                 for idx, l in enumerate(lines):
                     if idx == 0 and l == name:
                         continue
                     if '·' in l:
                         parts = [p.strip() for p in l.split('·')]
                         for p in parts:
-                            if any(term in p.lower() for term in ['estate', 'agency', 'developer', 'consult', 'company', 'service', 'contractor', 'hotel', 'hospital', 'store', 'restaurant', 'logistics', 'it', 'software', 'solutions', 'tech']):
+                            p_clean = p.strip()
+                            if not p_clean:
+                                continue
+                            if any(t in p_clean.lower() for t in ['gym', 'fitness', 'estate', 'agency', 'developer', 'consult', 'company', 'service', 'contractor', 'hotel', 'hospital', 'store', 'restaurant', 'logistics', 'it', 'software', 'solutions', 'tech']):
                                 if not category or category == query:
-                                    category = p
-                            elif not re.search(r'^\d\.\d', p) and not any(term in p.lower() for term in ['open', 'closed', 'wheelchair', 'delivery', 'pickup']):
-                                address_lines.append(p)
-                    elif idx != rating_line_idx:
-                        if not any(term in l.lower() for term in ['open', 'closed', 'review', 'website', 'directions', 'call', 'save', 'share']):
+                                    category = p_clean
+                            elif not re.search(r'^\d\.\d', p_clean) and not any(t in p_clean.lower() for t in ['open', 'closed', 'wheelchair', 'delivery', 'pickup']):
+                                address_lines.append(p_clean)
+                    else:
+                        if not any(t in l.lower() for t in ['open', 'closed', 'review', 'website', 'directions', 'call', 'save', 'share']) and not re.search(r'^\d\.\d\(\d+\)', l):
                             if not l.startswith('+') and not (phone and l in phone) and len(l) > 2:
                                 address_lines.append(l)
 
-                detected_city = req.city or ''
                 card_address = ', '.join(address_lines[:2]) if address_lines else ''
+
+                # City extraction
+                detected_city = req.city or ''
+                if not detected_city:
+                    m_city = re.search(r'\bin\s+([^,]+)', query, re.IGNORECASE)
+                    if m_city:
+                        detected_city = m_city.group(1).strip().title()
+
+                # Country Detection based on phone prefix and text
+                combined_check = f"{query} {card_address} {card_text} {detected_city}".lower()
+                if phone.startswith('+91') or any(k in combined_check for k in ['india', 'kerala', 'malappuram', 'perinthalmanna', 'kochi', 'bangalore', 'bengaluru', 'delhi', 'mumbai', 'tamil nadu', 'chennai', 'hyderabad', 'gurugram', 'noida', 'pune', 'calicut', 'kozhikode']):
+                    inferred_country = 'India'
+                elif phone.startswith('+966') or any(k in combined_check for k in ['saudi', 'riyadh', 'jeddah', 'dammam', 'khobar', 'mecca', 'medina', 'jubail']):
+                    inferred_country = 'Saudi Arabia'
+                elif phone.startswith('+971') or any(k in combined_check for k in ['uae', 'dubai', 'abu dhabi', 'sharjah', 'ajman']):
+                    inferred_country = 'UAE'
+                elif phone.startswith('+44') or any(k in combined_check for k in ['united kingdom', 'london', 'manchester', 'birmingham', 'uk']):
+                    inferred_country = 'United Kingdom'
+                elif phone.startswith('+1') or any(k in combined_check for k in ['usa', 'united states', 'new york', 'california', 'texas', 'chicago']):
+                    inferred_country = 'United States'
+                elif any(k in combined_check for k in ['singapore']):
+                    inferred_country = 'Singapore'
+                elif any(k in combined_check for k in ['japan', 'tokyo']):
+                    inferred_country = 'Japan'
+                elif any(k in combined_check for k in ['germany', 'berlin', 'munich', 'frankfurt']):
+                    inferred_country = 'Germany'
+                elif any(k in combined_check for k in ['qatar', 'doha']):
+                    inferred_country = 'Qatar'
+                elif any(k in combined_check for k in ['kuwait']):
+                    inferred_country = 'Kuwait'
+                elif any(k in combined_check for k in ['bahrain', 'manama']):
+                    inferred_country = 'Bahrain'
+                elif any(k in combined_check for k in ['oman', 'muscat']):
+                    inferred_country = 'Oman'
+                else:
+                    inferred_country = req.country if (req.country and req.country.lower() not in ['global', 'all', '', 'any']) else 'Global'
 
                 detected_sec = forced_sector or auto_detect_sector(name, category, card_text)
 
                 items.append({
-                    'name': name.strip(),
+                    'name': name,
                     'sector': detected_sec,
                     'category': category or 'Commercial Entity',
                     'companyType': 'Enterprise' if reviews_count > 100 else 'Mid-Market',
                     'city': detected_city or (card_address.split(',')[0].strip() if card_address else 'City Center'),
-                    'country': req.country or 'Global',
+                    'country': inferred_country,
                     'address': card_address or f"{name}, {detected_city}",
                     'phone': phone,
                     'website': website,
-                    'rating': rating or 4.5,
-                    'reviews_count': reviews_count or 25,
+                    'rating': rating,
+                    'reviews_count': reviews_count,
                     'source': 'Google Maps Live (Headless Chromium)',
                 })
         finally:

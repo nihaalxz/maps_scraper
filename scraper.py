@@ -253,15 +253,11 @@ def detect_country(city: str = '', query: str = '', address: str = '', phone: st
         if re.search(rf'\b{re.escape(country.lower())}\b', combined):
             return country
 
-    # 4. If address has a comma-separated trailing country
-    if address and ',' in address:
-        parts = [p.strip() for p in address.split(',') if p.strip()]
-        if parts:
-            last = parts[-1]
-            if len(last) > 2 and not any(ch.isdigit() for ch in last):
-                return last.title()
+    # Indian regions check
+    if any(k in combined for k in ['india', 'kerala', 'malappuram', 'kochi', 'bangalore', 'bengaluru', 'delhi', 'mumbai', 'tamil nadu', 'chennai', 'hyderabad', 'gurugram', 'noida', 'pune', 'calicut', 'kozhikode', 'perinthalmanna']):
+        return 'India'
 
-    return 'Saudi Arabia'
+    return 'Global'
 
 
 # ============================================================================
@@ -446,7 +442,7 @@ class GoogleMapsScraper:
         # -------------------------------------------------------------
         # Tier 0: Remote Headless Playwright Microservice (Render/Railway/Docker)
         # -------------------------------------------------------------
-        scraper_worker_url = os.environ.get('SCRAPER_WORKER_URL', '').strip().rstrip('/')
+        scraper_worker_url = os.environ.get('SCRAPER_WORKER_URL', 'https://maps-scraper-xl5c.onrender.com').strip().rstrip('/')
         if scraper_worker_url:
             try:
                 resp = requests.post(
@@ -458,7 +454,7 @@ class GoogleMapsScraper:
                         'limit': limit,
                         'sector': forced_sector
                     },
-                    timeout=50
+                    timeout=60
                 )
                 if resp.status_code == 200:
                     remote_leads = resp.json().get('leads', [])
@@ -484,7 +480,7 @@ class GoogleMapsScraper:
         # -------------------------------------------------------------
         # Tier 2: OpenStreetMap Live Commercial Places
         # -------------------------------------------------------------
-        if len(results) < limit:
+        if not results:
             try:
                 osm_limit = limit - len(results)
                 osm_results = self._scrape_osm_places(clean_kw, detected_city, detected_country, osm_limit, target_sector)
@@ -495,20 +491,6 @@ class GoogleMapsScraper:
                         results.append(r)
             except Exception as e:
                 print(f"[Scraper] OSM query error: {e}")
-
-        # -------------------------------------------------------------
-        # Tier 3: Arab Season Curated Lead Directory & Smart Fallback
-        # -------------------------------------------------------------
-        if len(results) < limit:
-            dir_results = self._supplement_leads(
-                needed=limit - len(results),
-                sector=target_sector,
-                city=detected_city,
-                country=detected_country,
-                query=clean_kw,
-                seen_names=seen_names
-            )
-            results.extend(dir_results)
 
         return results[:limit]
 
@@ -527,7 +509,7 @@ class GoogleMapsScraper:
         q = query.strip()
         if city:
             q = re.sub(rf'\b(?:in|at|around|near|for|of)\s+{re.escape(city)}\b', '', q, flags=re.IGNORECASE).strip()
-        if country:
+        if country and country != 'Global':
             q = re.sub(rf'\b(?:in|at|around|near|for|of)\s+{re.escape(country)}\b', '', q, flags=re.IGNORECASE).strip()
 
         # Strip filler words
@@ -539,7 +521,7 @@ class GoogleMapsScraper:
         q = re.sub(r'\s+', ' ', q).strip()
 
         clean_kw = q if len(q) >= 2 else query
-        return clean_kw, city or 'Riyadh', country or 'Saudi Arabia'
+        return clean_kw, city or '', country or 'Global'
 
     def _scrape_with_playwright(
         self,
