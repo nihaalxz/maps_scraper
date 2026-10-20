@@ -1,0 +1,83 @@
+@import '@fontsource-variable/outfit/index.css';
+@import '@fontsource/ibm-plex-sans-arabic/index.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 4.3%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 4.3%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 4.3%;
+    --primary: 76 83% 65%;
+    --primary-foreground: 0 0% 4.3%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 0 0% 4.3%;
+    --muted: 0 0% 95%;
+    --muted-foreground: 0 0% 54%;
+    --accent: 76 83% 65%;
+    --accent-foreground: 0 0% 4.3%;
+    --destructive: 2 83% 65%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 76 83% 65%;
+    --radius: 1.25rem;
+  }
+
+  * {
+    border-color: rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+  }
+
+  html {
+    font-family: 'Outfit Variable', 'Outfit', 'IBM Plex Sans Arabic', system-ui, -apple-system, sans-serif;
+    background-color: #E4E4E4;
+    color: #0B0B0B;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: #E4E4E4;
+    color: #0B0B0B;
+    min-inline-size: 1100px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 100vh;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Scrollbars styling: subtle and clean */
+  ::-webkit-scrollbar {
+    inline-size: 6px;
+    block-size: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.12);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.22);
+  }
+}
+
+/* Silky smooth 60fps sidebar transitions */
+.sidebar-shell {
+  transition: width 380ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: width;
+}
+
+.sidebar-panel {
+  transition: transform 340ms cubic-bezier(0.16, 1, 0.3, 1), opacity 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform, opacity;
+}
+
