@@ -135,6 +135,7 @@ def scrape_places(req: ScrapeRequest):
 
     with sync_playwright() as p:
         browser = None
+        launch_errs = []
         for channel in [None, 'chrome', 'msedge']:
             try:
                 if channel:
@@ -150,11 +151,12 @@ def scrape_places(req: ScrapeRequest):
                         ]
                     )
                 break
-            except Exception:
+            except Exception as e:
+                launch_errs.append(str(e))
                 continue
 
         if not browser:
-            return {'status': 'error', 'message': 'Could not launch Chromium browser', 'leads': []}
+            return {'status': 'error', 'message': f'Could not launch Chromium: {launch_errs}', 'leads': []}
 
         try:
             context = browser.new_context(
